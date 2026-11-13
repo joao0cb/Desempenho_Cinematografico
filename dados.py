@@ -17,7 +17,7 @@ from datetime import date
 from itertools import islice
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
-from dominio import Movie, Predicado
+from dominio import CAMPOS_LISTA, Movie, Predicado
 
 ANO_MIN: int = 1888
 """Primeiro filme da história (Roundhay Garden Scene); antes disso o ano é inválido."""
@@ -112,6 +112,9 @@ _CONVERSORES: tuple[Callable[[object], Any], ...] = tuple(
     _CONVERSOR_POR_CAMPO[campo] for campo in Movie._fields
 )
 
+# Campos que viram texto JSON no banco (fonte única: dominio.CAMPOS_LISTA).
+_CAMPOS_LISTA: frozenset[str] = frozenset(CAMPOS_LISTA)
+
 
 # --------------------------------------------------------------------------
 # Conversão linha <-> Movie
@@ -135,10 +138,15 @@ def linha_para_movie(linha: Sequence[object] | None) -> Movie | None:
 
 
 def filme_para_linha(filme: Movie) -> tuple[object, ...]:
-    """Converte um Movie em linha para o banco (campos-lista viram texto JSON)."""
+    """Converte um Movie em linha para o banco (campos-lista viram texto JSON).
+
+    O que é lista vem de `dominio.CAMPOS_LISTA`, não do tipo do valor em tempo de
+    execução: assim uma lista comum (em vez de tupla) também é gravada como JSON,
+    em vez de estourar no driver do SQLite.
+    """
     return tuple(
-        json.dumps(list(valor), ensure_ascii=False) if isinstance(valor, tuple) else valor
-        for valor in filme
+        json.dumps(list(valor), ensure_ascii=False) if campo in _CAMPOS_LISTA else valor
+        for campo, valor in zip(Movie._fields, filme)
     )
 
 

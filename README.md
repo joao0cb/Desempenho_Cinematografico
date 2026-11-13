@@ -17,14 +17,14 @@ autenticada por *Bearer token* (`TMDB_TOKEN`, ver `.env.example`).
 | Endpoint | Uso | Campos aproveitados |
 |---|---|---|
 | `GET /discover/movie` | Descobrir filmes, paginado (20 por página). Fornece os **ids**. | `id` |
-| `GET /movie/{id}` | Detalhes de cada filme. | `title`, `release_date`, `genres`, `budget`, `revenue`, `vote_average` |
+| `GET /movie/{id}` | Detalhes de cada filme. | `title`, `release_date`, `genres`, `budget`, `revenue`, `vote_average`, `runtime`, `original_language`, `credits`, `release_dates`, `production_countries`, `production_companies`, `belongs_to_collection` |
 
 Por que dois endpoints: `/discover/movie` não traz `budget` nem `revenue`; esses campos só
 existem em `/movie/{id}`. Usamos `language=pt-BR` para os gêneros virem em português.
 
 > Observação sobre viés: os critérios de `/discover/movie` (ordenação, `vote_count.gte`...)
 > definem quais filmes entram na base e, portanto, influenciam as conclusões. Os parâmetros
-> exatos serão fixados e documentados na issue de ingestão.
+> exatos são fixados em `ingestao.py` e documentados aqui quando a ingestão for implementada.
 
 ## 2. Por que SQLite
 
@@ -45,8 +45,8 @@ terminal ◄── formatacao ◄── núcleo puro (filtros, métricas, ...) �
 ```
 
 - A **ingestão grava**; a **análise lê** com `SELECT` e **calcula em Python puro**.
-- É **proibido** usar `GROUP BY`, `AVG`, `SUM`, `ORDER BY` analítico etc. para fazer o
-  trabalho analítico: isso descaracterizaria o projeto de programação funcional.
+- É **proibido** usar `GROUP BY`, `AVG`, `SUM` etc. para fazer o trabalho analítico:
+  isso descaracterizaria o projeto de programação funcional.
 - `db.ler_filmes` devolve um **gerador** de `Movie` (avaliação preguiçosa).
 
 ### Regra de I/O
@@ -64,7 +64,7 @@ isso automaticamente (sem imports de I/O nem chamadas a `print`/`open`/`input`).
 ├── dominio.py       # Movie, ResumoGrupo, aliases de tipos
 ├── dados.py         # normalização/validação de registros
 ├── filtros.py       # fábricas de predicados
-├── metricas.py      # década, lucro, ROI, soma, média, mediana
+├── metricas.py      # década, lucro, ROI, soma, média, mediana + dimensões
 ├── analises.py      # agrupar_por, resumir, comparações
 ├── correlacao.py    # Pearson
 ├── ranking.py       # top de filmes e de grupos
@@ -75,265 +75,219 @@ isso automaticamente (sem imports de I/O nem chamadas a `print`/`open`/`input`).
 ├── schema.sql       # tabela `filmes`
 ├── data/            # cinema.db (gerado pela ingestão)
 ├── tests/
+│   ├── test_dominio.py
+│   ├── test_dados.py
+│   ├── test_db.py
+│   ├── test_metricas.py
+│   └── test_pureza.py
 ├── .env.example     # TMDB_TOKEN=
-└── requirements.txt
+└── requirements.txt # requests, python-dotenv, pytest
 ```
 
 ## 4. Formato dos dados
 
 ### Registro `Movie` (`dominio.py`)
 
-Imutável (`NamedTuple`): não há atribuição de campos; transformar = criar nova tupla.
+Imutável (`NamedTuple`): não há atribuição de campos; transformar = criar nova tupla
+(`filme._replace(...)`). Só `id`, `titulo` e `ano` são obrigatórios.
 
-| Campo | Tipo | Origem no TMDB | Convenção |
+| Campo | Tipo | Origem no TMDB | Convenção de "desconhecido" |
 |---|---|---|---|
-| `id` | `int` | `id` | chave primária |
-| `titulo` | `str` | `title` | — |
-| `ano` | `int` | `release_date[:4]` | filmes sem data de lançamento são descartados na ingestão |
-| `genero` | `str` | `genres[0].name` | **gênero principal** (um por filme); sem gênero → descartado |
-| `orcamento` | `int` | `budget` | USD; **0 = desconhecido** |
-| `faturamento` | `int` | `revenue` | USD; **0 = desconhecido** |
-| `nota` | `float` | `vote_average` | 0 a 10; **0.0 = sem avaliações** |
+| `id` | `int` | `id` | — (chave primária) |
+| `titulo` | `str` | `title` | `''` |
+| `ano` | `int` | `release_date[:4]` | `0` |
+| `data_lancamento` | `str` | `release_date` | `''` (ISO `AAAA-MM-DD`) |
+| `generos` | `tuple[str, ...]` | `genres[].name` | `()` |
+| `orcamento` | `int` | `budget` | `0` (USD) |
+| `faturamento` | `int` | `revenue` | `0` (USD) |
+| `nota` | `float` | `vote_average` | `0.0` (0 a 10) |
+| `popularidade` | `float` | `popularity` | `0.0` |
+| `duracao` | `int` | `runtime` | `0` (minutos) |
+| `idioma_original` | `str` | `original_language` | `''` |
+| `classificacao` | `str` | `release_dates` (EUA) | `''` |
+| `diretor` | `str` | `credits.crew` (`job == 'Director'`) | `''` |
+| `elenco` | `tuple[str, ...]` | `credits.cast` (5 primeiros) | `()` |
+| `paises` | `tuple[str, ...]` | `production_countries[].iso_3166_1` | `()` |
+| `empresas` | `tuple[str, ...]` | `production_companies[].name` | `()` |
+| `colecao` | `str` | `belongs_to_collection.name` | `''` |
 
 Consequências das convenções: o ROI só é calculado com `orcamento > 0`; correlações e
 comparações financeiras usam apenas filmes com orçamento e faturamento válidos
-(`dados.tem_financeiro_valido`). O ROI é uma **estimativa** `(faturamento - orcamento) / orcamento`,
-não uma apuração completa de lucro.
+(`dados.tem_financeiro_valido`). O ROI é uma **estimativa**
+`(faturamento - orcamento) / orcamento`, não uma apuração completa de lucro.
 
 ### Schema (`schema.sql`)
 
+17 colunas, **na mesma ordem dos campos de `Movie`** — `db.py` monta a lista de colunas a
+partir de `Movie._fields` e `tests/test_db.py` garante que o schema segue essa ordem.
+Campos de lista (`generos`, `elenco`, `paises`, `empresas`) são gravados como texto JSON
+(`'["Ação", "Ficção científica"]'`).
+
 ```sql
 CREATE TABLE IF NOT EXISTS filmes (
-    id          INTEGER PRIMARY KEY,
-    titulo      TEXT    NOT NULL,
-    ano         INTEGER NOT NULL,
-    genero      TEXT    NOT NULL,
-    orcamento   INTEGER NOT NULL DEFAULT 0 CHECK (orcamento   >= 0),
-    faturamento INTEGER NOT NULL DEFAULT 0 CHECK (faturamento >= 0),
-    nota        REAL    NOT NULL DEFAULT 0.0 CHECK (nota BETWEEN 0 AND 10)
+    id              INTEGER PRIMARY KEY,
+    titulo          TEXT    NOT NULL,
+    ano             INTEGER NOT NULL,
+    data_lancamento TEXT    NOT NULL DEFAULT '',
+    generos         TEXT    NOT NULL DEFAULT '[]',
+    orcamento       INTEGER NOT NULL DEFAULT 0 CHECK (orcamento   >= 0),
+    faturamento     INTEGER NOT NULL DEFAULT 0 CHECK (faturamento >= 0),
+    nota            REAL    NOT NULL DEFAULT 0.0 CHECK (nota BETWEEN 0 AND 10),
+    popularidade    REAL    NOT NULL DEFAULT 0.0 CHECK (popularidade >= 0),
+    duracao         INTEGER NOT NULL DEFAULT 0 CHECK (duracao >= 0),
+    idioma_original TEXT    NOT NULL DEFAULT '',
+    classificacao   TEXT    NOT NULL DEFAULT '',
+    diretor         TEXT    NOT NULL DEFAULT '',
+    elenco          TEXT    NOT NULL DEFAULT '[]',
+    paises          TEXT    NOT NULL DEFAULT '[]',
+    empresas        TEXT    NOT NULL DEFAULT '[]',
+    colecao         TEXT    NOT NULL DEFAULT ''
 );
 ```
 
-A ordem das colunas é a ordem dos campos de `Movie`: `Movie(*linha)` lê e a própria tupla
-é gravada.
-
-### Exemplo de linha
-
-| id | titulo | ano | genero | orcamento | faturamento | nota |
-|---|---|---|---|---|---|---|
-| 603 | Matrix | 1999 | Ação | 63000000 | 463517383 | 8.2 |
-
 ## 5. Contrato público dos módulos
 
-Assinaturas (com *type hints*) que as duas frentes devem respeitar. Os corpos ainda são
-`raise NotImplementedError`, exceto `dominio.py` e `db.py`. Alterar uma assinatura exige
-combinar com a dupla.
+Assinaturas que as duas frentes devem respeitar. Alterar uma assinatura exige combinar
+com a dupla. **[ok]** = implementado; **[stub]** = só assinatura, `NotImplementedError`.
 
-### `dominio.py` — Domínio (tipos compartilhados) (puro)
+### `dominio.py` — tipos compartilhados (puro) [ok]
 
 ```python
-class Movie(NamedTuple):
-    id: int
-    titulo: str
-    ano: int
-    genero: str
-    orcamento: int
-    faturamento: int
-    nota: float
-
+class Movie(NamedTuple): ...        # 17 campos, ver seção 4
 class ResumoGrupo(NamedTuple):
     quantidade: int
-    roi_medio: float | None
-    nota_media: float | None
-    faturamento_medio: float | None
+    indicadores: Mapping[str, float | None]
 
 Predicado = Callable[[Movie], bool]
+Seletor   = Callable[[Movie], float | None]
+Chave     = tuple[Hashable, ...]
+Dimensao  = Callable[[Movie], tuple[Hashable, ...]]
 
-Seletor = Callable[[Movie], float | None]
+CAMPOS_NUMERICOS / CAMPOS_TEXTO / CAMPOS_LISTA: tuple[str, ...]
 ```
 
-### `dados.py` — Preparação e validação dos dados (puro)
+### `dados.py` — preparação, validação e limpeza (puro) [ok, exceto `para_movie`]
 
 ```python
-# Converte o JSON de /movie/{id} em Movie.
-def para_movie(detalhe: Mapping[str, Any]) -> Movie | None
-
-# True se orcamento > 0 (requisito para calcular ROI).
-def tem_orcamento_valido(filme: Movie) -> bool
-
-# True se faturamento > 0.
-def tem_faturamento_valido(filme: Movie) -> bool
-
-# True se orçamento e faturamento são ambos > 0.
-def tem_financeiro_valido(filme: Movie) -> bool
-
-# True se nota > 0 (filme tem avaliações).
-def tem_nota_valida(filme: Movie) -> bool
-
-# Mantém (lazy) só os filmes com orçamento e faturamento válidos.
-def com_financeiro_valido(filmes: Iterable[Movie]) -> Iterator[Movie]
-
-# Mantém (lazy) só os filmes com nota válida.
-def com_nota_valida(filmes: Iterable[Movie]) -> Iterator[Movie]
+def linha_para_movie(linha) -> Movie | None          # tolera nulos, texto numérico, JSON inválido
+def filme_para_linha(filme: Movie) -> tuple          # listas -> JSON (usa dominio.CAMPOS_LISTA)
+def para_filmes(linhas) -> Iterator[Movie]           # descarta linhas inutilizáveis (lazy)
+def para_movie(detalhe: Mapping[str, Any]) -> Movie | None   # [stub] ingestão
+def tem_valor(campo: str) -> Predicado               # HOF: predicado por nome de campo
+def tem_orcamento_valido / tem_faturamento_valido / tem_financeiro_valido / tem_nota_valida / tem_ano_valido(filme) -> bool
+def eh_valido(filme: Movie) -> bool
+def limpar_com(exigencias: Iterable[Predicado], filmes) -> Iterator[Movie]
+def limpar(filmes) -> Iterator[Movie]                # exige os 4 REQUISITOS_PADRAO
+def com_financeiro_valido / com_nota_valida(filmes) -> Iterator[Movie]
+def amostra(filmes, n: int, inicio: int = 0) -> Iterator[Movie]   # islice
 ```
 
-### `filtros.py` — Filtros (funções de alta ordem) (puro)
+### `metricas.py` — métricas e dimensões (puro) [ok]
 
 ```python
-# Predicado: filme do gênero informado (sem diferenciar maiúsculas).
+def decada(filme) -> int            # 1994 -> 1990
+def mes(filme) -> int | None        # 1..12, a partir de data_lancamento
+def trimestre(filme) -> int | None  # 1..4
+def lucro(filme) -> int             # faturamento - orcamento (pode ser negativo)
+def roi(filme) -> float | None      # None se orcamento <= 0
+def soma(valores) -> float                              # reduce
+def media(valores) -> float | None                      # reduce com acumulador (soma, contagem)
+def mediana(valores) -> float | None                    # sorted, sem alterar a entrada
+def metrica(nome: str) -> Seletor       # catálogo: NOMES_METRICAS
+def dimensao(nome: str) -> Dimensao     # catálogo: NOMES_DIMENSOES
+```
+
+`NOMES_METRICAS`: `orcamento, faturamento, lucro, roi, nota, popularidade, duracao, ano`.
+`NOMES_DIMENSOES`: `genero, decada, ano, mes, trimestre, idioma, classificacao, diretor,
+ator, pais, empresa, colecao, em_franquia, faixa_orcamento, faixa_nota, faixa_duracao`.
+Dimensões de lista devolvem **uma chave por item** (o filme entra em vários grupos);
+campo desconhecido devolve `()` e o filme fica fora daquele agrupamento.
+
+### `filtros.py` — filtros (funções de alta ordem) (puro) [stub]
+
+```python
 def por_genero(genero: str) -> Predicado
-
-# Predicado: filme lançado na década informada (ex.: 1990 -> 1990..1999).
 def por_decada(decada: int) -> Predicado
-
-# Predicado: minimo <= orcamento <= maximo (maximo=None -> sem limite).
-def por_faixa_orcamento(minimo: int=0, maximo: int | None=None) -> Predicado
-
-# Predicado: minimo <= faturamento <= maximo (maximo=None -> sem limite).
-def por_faixa_faturamento(minimo: int=0, maximo: int | None=None) -> Predicado
-
-# Predicado: minimo <= nota <= maximo.
-def por_faixa_nota(minimo: float=0.0, maximo: float=10.0) -> Predicado
-
-# Composição (E lógico) de predicados; sem argumentos, aceita tudo.
-def combinar(*predicados: Predicado) -> Predicado
-
-# Aplica o predicado de forma preguiçosa (wrapper de `filter`).
-def filtrar(predicado: Predicado, filmes: Iterable[Movie]) -> Iterator[Movie]
+def por_faixa(campo: str, minimo: float | None = None, maximo: float | None = None) -> Predicado
+def por_valor(campo: str, *valores: object) -> Predicado
+def contendo(campo: str, *valores: str) -> Predicado
+def combinar(*predicados: Predicado) -> Predicado     # E
+def qualquer(*predicados: Predicado) -> Predicado     # OU
+def negar(predicado: Predicado) -> Predicado
+def filtrar(predicado: Predicado, filmes) -> Iterator[Movie]
 ```
 
-### `metricas.py` — Métricas elementares (puro)
+### `analises.py` — agrupamento e comparação (puro) [stub]
 
 ```python
-# Década de lançamento (ex.: 1994 -> 1990).
-def decada(filme: Movie) -> int
-
-# faturamento - orcamento (estimativa; ignora outros custos).
-def lucro(filme: Movie) -> int
-
-# (faturamento - orcamento) / orcamento; None se orcamento <= 0.
-def roi(filme: Movie) -> float | None
-
-# Soma via reduce; 0.0 para sequência vazia.
-def soma(valores: Iterable[float]) -> float
-
-# Média aritmética; None para sequência vazia.
-def media(valores: Iterable[float]) -> float | None
-
-# Mediana; None para sequência vazia.
-def mediana(valores: Iterable[float]) -> float | None
+def agrupar_por(chave: Callable[[Movie], K], filmes) -> Mapping[K, tuple[Movie, ...]]
+def resumir(filmes) -> ResumoGrupo
+def comparar_por_genero(filmes) -> Mapping[str, ResumoGrupo]
+def comparar_por_decada(filmes) -> Mapping[int, ResumoGrupo]
 ```
 
-### `analises.py` — Agrupamento e comparação de grupos (puro)
+> Pendência de contrato: `metricas.dimensao()` devolve **várias** chaves por filme
+> (`dominio.Dimensao`), mas `agrupar_por` recebe uma chave única. Ao implementar a issue
+> de agrupamento, `agrupar_por` deve aceitar `Dimensao` para consumir `dimensao("genero")`.
+
+### `correlacao.py` — Pearson (puro) [stub]
 
 ```python
-# Agrupa filmes pela chave sem mutar a entrada (ex.: genero, metricas.decada).
-def agrupar_por(chave: Callable[[Movie], K], filmes: Iterable[Movie]) -> Mapping[K, tuple[Movie, ...]]
-
-# Calcula quantidade, ROI médio, nota média e faturamento médio do grupo.
-def resumir(filmes: Iterable[Movie]) -> ResumoGrupo
-
-# Indicadores por gênero.
-def comparar_por_genero(filmes: Iterable[Movie]) -> Mapping[str, ResumoGrupo]
-
-# Indicadores por década.
-def comparar_por_decada(filmes: Iterable[Movie]) -> Mapping[int, ResumoGrupo]
-```
-
-### `correlacao.py` — Correlação de Pearson (puro)
-
-```python
-# Coeficiente de Pearson; None se < 2 pares ou variância zero.
 def pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None
-
-# Correlação entre dois seletores, descartando filmes em que algum é None.
-def correlacionar(x: Seletor, y: Seletor, filmes: Iterable[Movie]) -> float | None
-
-# Correlação orçamento x faturamento (só filmes com financeiro válido).
-def orcamento_vs_faturamento(filmes: Iterable[Movie]) -> float | None
-
-# Correlação orçamento x nota (só filmes com orçamento e nota válidos).
-def orcamento_vs_nota(filmes: Iterable[Movie]) -> float | None
+def correlacionar(x: Seletor, y: Seletor, filmes) -> float | None
+def orcamento_vs_faturamento(filmes) -> float | None
+def orcamento_vs_nota(filmes) -> float | None
 ```
 
-### `ranking.py` — Rankings (puro)
+### `ranking.py` — rankings (puro) [stub]
 
 ```python
-# Os n primeiros filmes pela chave (ex.: faturamento, nota, metricas.roi).
-def top_filmes(n: int, chave: Seletor, filmes: Iterable[Movie], decrescente: bool=True) -> tuple[Movie, ...]
-
-# Os n primeiros grupos pela chave (ex.: lambda r: r.roi_medio).
-def top_grupos(n: int, chave: Callable[[ResumoGrupo], float | None], grupos: Mapping[K, ResumoGrupo], decrescente: bool=True) -> tuple[tuple[K, ResumoGrupo], ...]
+def top_filmes(n: int, chave: Seletor, filmes, decrescente: bool = True) -> tuple[Movie, ...]
+def top_grupos(n: int, indicador: str, grupos: Mapping[Chave, ResumoGrupo],
+               decrescente: bool = True) -> tuple[tuple[Chave, ResumoGrupo], ...]
 ```
 
-### `formatacao.py` — Formatação e exibição (I/O: terminal)
+### `formatacao.py` — formatação e exibição (I/O: terminal) [stub]
 
 ```python
-# Ex.: 1234567 -> 'US$ 1.234.567'.
-def formatar_moeda(valor: float) -> str
-
-# Ex.: 3.0 -> '300,0%'; None -> '-'.
-def formatar_percentual(valor: float | None) -> str
-
-# Tabela de texto com os filmes.
-def formatar_filmes(filmes: Iterable[Movie]) -> str
-
-# Tabela de texto comparando grupos (gênero, década...).
-def formatar_comparacao(titulo: str, grupos: Iterable[tuple[object, ResumoGrupo]]) -> str
-
-# Linha de texto com o coeficiente (e aviso de que não é causalidade).
+def formatar_moeda(valor: float) -> str          # 1234567 -> 'US$ 1.234.567'
+def formatar_percentual(valor: float | None) -> str   # 3.0 -> '300,0%'; None -> '-'
+def formatar_filmes(filmes) -> str
+def formatar_comparacao(titulo: str, grupos) -> str
 def formatar_correlacao(rotulo: str, r: float | None) -> str
-
-# Escreve o texto no terminal.
 def exibir(texto: str) -> None
 ```
 
-### `tmdb.py` — Cliente da API do TMDB (I/O: rede)
+### `tmdb.py` — cliente da API (I/O: rede) [stub]
 
 ```python
-# Lê TMDB_TOKEN do ambiente/.env; levanta RuntimeError se ausente.
-def carregar_token() -> str
-
-# GET /discover/movie (uma página): lista de filmes com seus ids.
-def descobrir_filmes(token: str, pagina: int=1) -> Mapping[str, Any]
-
-# GET /movie/{id}: detalhes do filme (budget, revenue, genres...).
+def carregar_token() -> str                      # TMDB_TOKEN do ambiente/.env
+def descobrir_filmes(token: str, pagina: int = 1) -> Mapping[str, Any]
 def detalhar_filme(token: str, filme_id: int) -> Mapping[str, Any]
 ```
 
-### `db.py` — Persistência SQLite (I/O: banco)
+### `db.py` — persistência SQLite (I/O: banco) [ok]
 
 ```python
-# Abre (e cria, se preciso) o banco. Aceita ':memory:' para testes.
-def conectar(caminho: Path | str=DB_PADRAO) -> sqlite3.Connection
-
-# Cria a tabela `filmes` a partir de schema.sql (idempotente).
-def inicializar_schema(conn: sqlite3.Connection) -> None
-
-# Grava (insere ou substitui por id) os filmes; devolve quantos foram gravados.
-def inserir_filmes(conn: sqlite3.Connection, filmes: Iterable[Movie]) -> int
-
-# Gerador de todos os filmes (SELECT simples, sem agregação).
-def ler_filmes(conn: sqlite3.Connection) -> Iterator[Movie]
+def conectar(caminho: Path | str = DB_PADRAO) -> sqlite3.Connection
+def inicializar_schema(conn) -> None
+def inserir_filmes(conn, filmes: Iterable[Movie]) -> int
+def ler_linhas(conn) -> Iterator[tuple]
+def ler_filmes(conn) -> Iterator[Movie]
 ```
 
-### `ingestao.py` — Ingestão TMDB → SQLite (I/O: rede + banco)
+### `ingestao.py` — TMDB -> SQLite (I/O: rede + banco) [stub]
 
 ```python
-# Gera (lazy) Movies válidos a partir de `paginas` páginas do discover.
 def coletar_filmes(token: str, paginas: int) -> Iterator[Movie]
-
-# Cria o schema, coleta e grava os filmes; devolve quantos foram gravados.
-def ingerir(paginas: int=25, caminho_db: Path | str=DB_PADRAO) -> int
+def ingerir(paginas: int = 25, caminho_db: Path | str = DB_PADRAO) -> int
 ```
 
-### `main.py` — CLI / orquestração (I/O: terminal)
+### `main.py` — CLI (I/O: terminal) [stub]
 
 ```python
-# Interpreta os argumentos, executa a análise pedida e devolve o código de saída.
-def main(argv: Sequence[str] | None=None) -> int
+def main(argv: Sequence[str] | None = None) -> int
 ```
-
 
 ## 6. Como executar (Windows / PowerShell)
 
@@ -344,14 +298,31 @@ pip install -r requirements.txt
 
 Copy-Item .env.example .env      # depois edite o .env e preencha TMDB_TOKEN
 
-python -m pytest                 # testes
-python main.py                   # CLI (a ser implementado)
+python -m pytest                 # testes (98 atualmente)
+python main.py                   # CLI (a ser implementada)
 ```
 
 O `.env` está no `.gitignore`: **nunca** commite o token.
 
-## 7. Critérios de aceite da issue 1
+## 7. Estado das entregas
 
-- [x] Esqueleto commitado (arquivos e pastas da seção 3).
-- [x] `README.md` com contrato, schema e formato dos dados.
-- [x] Nenhum módulo do núcleo faz I/O (verificado por `tests/test_pureza.py`).
+| Issue | Escopo | Estado |
+|---|---|---|
+| #2 | Contrato de dados, schema e esqueleto | concluída |
+| #1 | Leitura preguiçosa do banco e limpeza (`dados.py`, `db.py`) | concluída |
+| #3 | Métricas e dimensões (`metricas.py`) | concluída |
+| #13 | Cliente TMDB (`tmdb.py`) | pendente |
+| #12 | Ingestão e persistência (`ingestao.py`) | pendente |
+| #8 / #4 / #5 | Análises, rankings e correlação | pendente |
+| #6 | Filtros | pendente |
+| #11 / #10 | CLI, README final e roteiro | pendente |
+| #7 | Testes do cliente e do banco | pendente |
+
+Critérios já verificados:
+
+- [x] `Movie` imutável, 17 campos, schema na mesma ordem (`tests/test_db.py`)
+- [x] Leitura em streaming, sem `fetchall()` (`tests/test_db.py`)
+- [x] Nenhuma agregação na consulta SQL (`tests/test_db.py`)
+- [x] Núcleo sem I/O (`tests/test_pureza.py`, via AST)
+- [x] Funções preguiçosas testadas com gerador infinito (`tests/test_dados.py`)
+- [x] `metricas` cobertas por testes, incluindo casos de borda (`tests/test_metricas.py`)
