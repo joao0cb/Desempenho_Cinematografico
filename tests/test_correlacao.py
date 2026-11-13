@@ -8,8 +8,9 @@ from correlacao import (
 )
 from dominio import Movie
 
-BASE = Movie(id=1, titulo="X", ano=2015, genero="Drama",
-             orcamento=10.0, faturamento=30.0, nota=7.0)
+# Movie tem 17 campos: gêneros vêm em tupla e o resto tem valor padrão.
+BASE = Movie(id=1, titulo="X", ano=2015, generos=("Drama",),
+             orcamento=10, faturamento=30, nota=7.0)
 
 
 def filme(**campos) -> Movie:
@@ -54,30 +55,33 @@ def test_correlacionar_usa_os_seletores():
 
 
 def test_correlacionar_descarta_filmes_com_seletor_none():
-    filmes = (filme(id=1, orcamento=1.0, faturamento=2.0),
-              filme(id=2, orcamento=2.0, faturamento=4.0),
-              filme(id=3, orcamento=3.0, faturamento=6.0),
-              filme(id=4, orcamento=100.0, faturamento=0.5))   # será descartado
-    seletor_orc = lambda f: f.orcamento if f.id != 4 else None
-    assert correlacionar(seletor_orc, lambda f: f.faturamento, filmes) == pytest.approx(1.0)
+    filmes = (filme(id=1, orcamento=1, faturamento=2),
+              filme(id=2, orcamento=2, faturamento=4),
+              filme(id=3, orcamento=3, faturamento=6),
+              filme(id=4, orcamento=100, faturamento=1))   # será descartado
+
+    def seletor_orcamento(filme: Movie) -> float | None:
+        return filme.orcamento if filme.id != 4 else None
+
+    assert correlacionar(seletor_orcamento, lambda f: f.faturamento, filmes) == pytest.approx(1.0)
 
 
 def test_correlacionar_aceita_gerador():
-    filmes = (filme(id=i, orcamento=float(i), faturamento=2.0 * i) for i in (1, 2, 3))
+    filmes = (filme(id=i, orcamento=i, faturamento=2 * i) for i in (1, 2, 3))
     assert correlacionar(lambda f: f.orcamento, lambda f: f.faturamento, filmes) == pytest.approx(1.0)
 
 
 # ---------- orcamento_vs_faturamento ----------
 
 def test_orcamento_vs_faturamento_correlacao_perfeita():
-    filmes = tuple(filme(id=i, orcamento=float(i), faturamento=3.0 * i) for i in (1, 2, 3))
+    filmes = tuple(filme(id=i, orcamento=i, faturamento=3 * i) for i in (1, 2, 3))
     assert orcamento_vs_faturamento(filmes) == pytest.approx(1.0)
 
 
 def test_orcamento_vs_faturamento_ignora_zero_como_desconhecido():
-    validos = tuple(filme(id=i, orcamento=float(i), faturamento=3.0 * i) for i in (1, 2, 3))
-    sem_orcamento = filme(id=9, orcamento=0.0, faturamento=999.0)
-    sem_faturamento = filme(id=10, orcamento=50.0, faturamento=0.0)
+    validos = tuple(filme(id=i, orcamento=i, faturamento=3 * i) for i in (1, 2, 3))
+    sem_orcamento = filme(id=9, orcamento=0, faturamento=999)
+    sem_faturamento = filme(id=10, orcamento=50, faturamento=0)
     assert orcamento_vs_faturamento(validos + (sem_orcamento, sem_faturamento)) == pytest.approx(1.0)
 
 
@@ -87,7 +91,7 @@ def test_base_vazia_devolve_none():
 
 
 def test_todos_sem_dados_validos_devolve_none():
-    filmes = (filme(id=1, orcamento=0.0), filme(id=2, orcamento=0.0))
+    filmes = (filme(id=1, orcamento=0), filme(id=2, orcamento=0))
     assert orcamento_vs_faturamento(filmes) is None
 
 
@@ -98,24 +102,24 @@ def test_um_unico_filme_devolve_none():
 # ---------- orcamento_vs_nota ----------
 
 def test_orcamento_vs_nota_negativa():
-    filmes = (filme(id=1, orcamento=1.0, nota=9.0),
-              filme(id=2, orcamento=2.0, nota=6.0),
-              filme(id=3, orcamento=3.0, nota=3.0))
+    filmes = (filme(id=1, orcamento=1, nota=9.0),
+              filme(id=2, orcamento=2, nota=6.0),
+              filme(id=3, orcamento=3, nota=3.0))
     assert orcamento_vs_nota(filmes) == pytest.approx(-1.0)
 
 
 def test_orcamento_vs_nota_ignora_nota_zero():
-    validos = (filme(id=1, orcamento=1.0, nota=9.0),
-               filme(id=2, orcamento=2.0, nota=6.0),
-               filme(id=3, orcamento=3.0, nota=3.0))
-    sem_nota = filme(id=9, orcamento=500.0, nota=0.0)
+    validos = (filme(id=1, orcamento=1, nota=9.0),
+               filme(id=2, orcamento=2, nota=6.0),
+               filme(id=3, orcamento=3, nota=3.0))
+    sem_nota = filme(id=9, orcamento=500, nota=0.0)
     assert orcamento_vs_nota(validos + (sem_nota,)) == pytest.approx(-1.0)
 
 
 # ---------- pureza ----------
 
 def test_entrada_nao_e_alterada():
-    filmes = (filme(id=1), filme(id=2, orcamento=20.0, faturamento=70.0))
+    filmes = (filme(id=1), filme(id=2, orcamento=20, faturamento=70))
     copia = tuple(filmes)
     orcamento_vs_faturamento(filmes)
     orcamento_vs_nota(filmes)

@@ -1,72 +1,71 @@
-"""Correlação de Pearson entre variáveis numéricas (pura).
+"""Correlação de Pearson entre variáveis numéricas (puro).
 
 Correlação não implica causalidade: a interpretação é de quem lê o resultado.
 """
-
 from __future__ import annotations
+
 from math import sqrt
-from functools import reduce
-from operator import add, attrgetter, itemgetter, mul
+from operator import attrgetter, itemgetter, mul
 from typing import Callable, Iterable, Sequence
+
 from dominio import Movie, Seletor
+from metricas import soma
 
 
 def compor(f: Callable, g: Callable) -> Callable:
-    "Composição de funções: Compor(f,g)(X) == f(g(x))"
+    """Composição de funções: compor(f, g)(x) == f(g(x))."""
     return lambda x: f(g(x))
 
 
-def _somar(values: Iterable[float]) -> float:
-    "Soma por redução: reduce(add, ...) substitui um laço com um acumulador mutável"
-    return reduce(add, values, 0.0)
-
-
-def _desvios(values: Sequence[float]) -> float:
-    mean = _somar(values) / len(values)
-    return tuple(map(lambda v: v - mean, values))
+def _desvios(valores: Sequence[float]) -> tuple[float, ...]:
+    """Cada valor menos a média da série (desvios usados na covariância)."""
+    media_da_serie = soma(valores) / len(valores)
+    return tuple(map(lambda valor: valor - media_da_serie, valores))
 
 
 def pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:
-    """Coeficiente de Pearson; None se < 2 pares ou variância zero."""
-    pairs = tuple(zip(xs, ys))
-    colunas_x = tuple(map(itemgetter(0), pairs))
-    colunas_y = tuple(map(itemgetter(1), pairs))
+    """Coeficiente de Pearson; None se houver menos de 2 pares ou série constante."""
+    pares = tuple(zip(xs, ys))
+    valores_x = tuple(map(itemgetter(0), pares))
+    valores_y = tuple(map(itemgetter(1), pares))
 
-    if len(pairs) < 2 or len(frozenset(colunas_x)) < 2 or len(frozenset(colunas_y)) < 2:
+    if len(pares) < 2 or len(frozenset(valores_x)) < 2 or len(frozenset(valores_y)) < 2:
         return None
 
-    dx, dy = _desvios(colunas_x), _desvios(colunas_y)
-    covariancia = _somar(map(mul, dx, dy))
-    var_x = _somar(map(lambda d: d * d, dx))
-    var_y = _somar(map(lambda d: d * d, dy))
-    return max(-1.0, min(1.0, covariancia / sqrt(var_x * var_y)))
+    desvios_x, desvios_y = _desvios(valores_x), _desvios(valores_y)
+    covariancia = soma(map(mul, desvios_x, desvios_y))
+    variancia_x = soma(map(lambda desvio: desvio * desvio, desvios_x))
+    variancia_y = soma(map(lambda desvio: desvio * desvio, desvios_y))
+
+    # O limitador absorve erro de ponto flutuante (ex.: 1.0000000000000002).
+    return max(-1.0, min(1.0, covariancia / sqrt(variancia_x * variancia_y)))
 
 
-def correlacionar(x: Seletor, y: Seletor, movies: Iterable[Movie]) -> float | None:
-    """Correlação entre dois seletores, descartando filmes em que algum é None."""
-    candidates = map(lambda movie: (x(movie), y(movie)), movies)
-    valids = tuple(filter(lambda pair: None not in pair, candidates))
+def correlacionar(x: Seletor, y: Seletor, filmes: Iterable[Movie]) -> float | None:
+    """Correlação entre dois seletores, descartando filmes em que algum devolve None."""
+    candidatos = map(lambda filme: (x(filme), y(filme)), filmes)
+    validos = tuple(filter(lambda par: None not in par, candidatos))
     return pearson(
-        tuple(map(itemgetter(0), valids)),
-        tuple(map(itemgetter(1), valids)),
+        tuple(map(itemgetter(0), validos)),
+        tuple(map(itemgetter(1), validos)),
     )
 
 
-def _positivo(value: float | None) -> float | None:
-    "O TMDB usa 0 para não informado: para Análise, zero equivale a ausente"
-    return value if value is not None and value > 0 else None
+def _positivo(valor: float | None) -> float | None:
+    """O TMDB usa 0 para 'não informado': para Análise, zero equivale a ausente."""
+    return valor if valor is not None and valor > 0 else None
 
 
-_budget: Seletor = compor(_positivo, attrgetter("orcamento"))
-_revenue: Seletor = compor(_positivo, attrgetter("faturamento"))
-_score: Seletor = compor(_positivo, attrgetter("nota"))
+_orcamento: Seletor = compor(_positivo, attrgetter("orcamento"))
+_faturamento: Seletor = compor(_positivo, attrgetter("faturamento"))
+_nota: Seletor = compor(_positivo, attrgetter("nota"))
 
 
-def orcamento_vs_faturamento(movies: Iterable[Movie]) -> float | None:
+def orcamento_vs_faturamento(filmes: Iterable[Movie]) -> float | None:
     """Correlação orçamento x faturamento (só filmes com financeiro válido)."""
-    return correlacionar(_budget, _revenue, movies)
+    return correlacionar(_orcamento, _faturamento, filmes)
 
 
-def orcamento_vs_nota(movies: Iterable[Movie]) -> float | None:
+def orcamento_vs_nota(filmes: Iterable[Movie]) -> float | None:
     """Correlação orçamento x nota (só filmes com orçamento e nota válidos)."""
-    return correlacionar(_budget, _score, movies)
+    return correlacionar(_orcamento, _nota, filmes)
