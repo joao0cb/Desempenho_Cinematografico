@@ -1,17 +1,15 @@
 """Rankings de filmes e de grupos (puros)."""
 from __future__ import annotations
 
-from typing import Callable, Iterable, Mapping, TypeVar
+from typing import Iterable, Mapping
 
-from dominio import Movie, ResumoGrupo, Seletor
-
-K = TypeVar("K")
+from dominio import Chave, Movie, ResumoGrupo, Seletor
 
 
 def top_filmes(
     n: int, chave: Seletor, filmes: Iterable[Movie], decrescente: bool = True
 ) -> tuple[Movie, ...]:
-    """Os n primeiros filmes pela chave (ex.: faturamento, nota, metricas.roi).
+    """Os n primeiros filmes pela chave (qualquer métrica: faturamento, nota, roi, duracao...).
 
     Filmes cuja chave é None ficam de fora.
     """
@@ -20,9 +18,12 @@ def top_filmes(
 
 def top_grupos(
     n: int,
-    chave: Callable[[ResumoGrupo], float | None],
-    grupos: Mapping[K, ResumoGrupo],
+    indicador: str,
+    grupos: Mapping[Chave, ResumoGrupo],
     decrescente: bool = True,
-) -> tuple[tuple[K, ResumoGrupo], ...]:
-    """Os n primeiros grupos pela chave (ex.: lambda r: r.roi_medio)."""
+) -> tuple[tuple[Chave, ResumoGrupo], ...]:
+    """Os n primeiros grupos por um indicador do resumo (ex.: 'roi', 'nota').
+
+    Grupos em que o indicador é None ficam de fora.
+    """
     raise NotImplementedError
