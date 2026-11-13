@@ -21,5 +21,8 @@ def descobrir_filmes(token: str, pagina: int = 1) -> Mapping[str, Any]:
 
 
 def detalhar_filme(token: str, filme_id: int) -> Mapping[str, Any]:
-    """GET /movie/{id}: detalhes do filme (budget, revenue, genres...)."""
+    """GET /movie/{id}?language=pt-BR&append_to_response=credits,release_dates.
+
+    Uma única requisição traz detalhes, elenco/equipe e classificações indicativas.
+    """
     raise NotImplementedError
