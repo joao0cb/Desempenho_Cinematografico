@@ -1,4 +1,5 @@
 import re
+from contextlib import closing
 
 from dados import amostra, limpar
 from db import CONSULTA_FILMES, conectar, inicializar_schema, inserir_filmes, ler_filmes, ler_linhas
@@ -69,3 +70,32 @@ def test_banco_para_limpar_para_amostra():
     conn = _banco(FILMES + ruins)
     assert list(limpar(ler_filmes(conn))) == [COMPLETO]
     assert [f.id for f in amostra(ler_filmes(conn), 2)] == [1, 2]
+
+
+
+# ---------------------------------------------------------------- banco em arquivo
+
+def test_banco_em_arquivo_tmp_path_ida_e_volta(tmp_path):
+    caminho = tmp_path / "cinema.db"
+    with closing(conectar(caminho)) as conn:
+        inicializar_schema(conn)
+        inserir_filmes(conn, FILMES)
+
+    with closing(conectar(caminho)) as conn:      # reabre: gravou de verdade
+        assert list(ler_filmes(conn)) == FILMES
+
+
+def test_conectar_cria_a_pasta_do_banco(tmp_path):
+    caminho = tmp_path / "data" / "cinema.db"
+    with closing(conectar(caminho)) as conn:
+        inicializar_schema(conn)
+    assert caminho.exists()
+
+
+def test_banco_de_arquivo_nao_duplica_ao_inserir_de_novo(tmp_path):
+    caminho = tmp_path / "cinema.db"
+    with closing(conectar(caminho)) as conn:
+        inicializar_schema(conn)
+        inserir_filmes(conn, FILMES)
+        inserir_filmes(conn, FILMES)
+        assert len(list(ler_filmes(conn))) == len(FILMES)
