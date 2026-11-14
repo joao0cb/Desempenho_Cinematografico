@@ -190,14 +190,16 @@ def _primeiro_diretor(creditos: Mapping[str, Any]) -> str:
 
 def _classificacao(release_dates: object) -> str:
     """Certificação indicativa dos EUA (primeira não vazia); '' se não houver."""
-    for pais in _itens(_objeto(release_dates).get("results")):
-        if pais.get("iso_3166_1") != "US":
-            continue
-        for data in _itens(pais.get("release_dates")):
-            certificacao = _texto(data.get("certification"))
-            if certificacao:
-                return certificacao
-    return ""
+    return next(
+        (
+            _texto(data.get("certification"))
+            for pais in _itens(_objeto(release_dates).get("results"))
+            if pais.get("iso_3166_1") == "US"
+            for data in _itens(pais.get("release_dates"))
+            if _texto(data.get("certification"))
+        ),
+        "",
+    )
 
 
 def para_movie(detalhe: Mapping[str, Any]) -> Movie | None:

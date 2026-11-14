@@ -1,10 +1,14 @@
+import itertools
+
 import pytest
 
 from correlacao import (
     correlacionar,
     orcamento_vs_faturamento,
     orcamento_vs_nota,
+    pares_orcamento_faturamento,
     pearson,
+    relatorio_correlacao,
 )
 from dominio import Movie
 
@@ -124,3 +128,47 @@ def test_entrada_nao_e_alterada():
     orcamento_vs_faturamento(filmes)
     orcamento_vs_nota(filmes)
     assert filmes == copia
+
+
+
+# ---------- pares_orcamento_faturamento ----------
+
+def test_pares_orcamento_faturamento_descarta_invalidos():
+    filmes = (filme(id=1, orcamento=10, faturamento=30),
+              filme(id=2, orcamento=0, faturamento=99),
+              filme(id=3, orcamento=50, faturamento=0))
+    assert tuple(pares_orcamento_faturamento(filmes)) == ((10.0, 30.0),)
+
+
+def test_pares_orcamento_faturamento_e_preguicoso():
+    infinito = (filme(id=i + 1, orcamento=i + 1, faturamento=2 * (i + 1))
+                for i in itertools.count())
+    assert tuple(itertools.islice(pares_orcamento_faturamento(infinito), 3)) == (
+        (1.0, 2.0), (2.0, 4.0), (3.0, 6.0))
+
+
+def test_pares_orcamento_faturamento_base_vazia():
+    assert tuple(pares_orcamento_faturamento(())) == ()
+
+
+# ---------- relatorio_correlacao ----------
+
+def test_relatorio_mostra_coeficiente_e_pares():
+    filmes = tuple(filme(id=i, orcamento=i, faturamento=2 * i) for i in (1, 2, 3))
+    texto = relatorio_correlacao(filmes)
+    assert "1.000" in texto
+    assert "pares usados: 3" in texto
+    assert "causalidade" in texto.lower()
+
+
+def test_relatorio_sem_pares_explica_o_motivo():
+    texto = relatorio_correlacao((filme(id=1, orcamento=0, faturamento=0),))
+    assert "pares usados: 0" in texto
+    assert "não calculável" in texto
+    assert "causalidade" in texto.lower()
+
+
+def test_relatorio_com_um_unico_par_nao_calcula():
+    texto = relatorio_correlacao((filme(id=1, orcamento=10, faturamento=30),))
+    assert "pares usados: 1" in texto
+    assert "não calculável" in texto

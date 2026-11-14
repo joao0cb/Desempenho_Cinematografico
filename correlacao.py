@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from math import sqrt
 from operator import attrgetter, itemgetter, mul
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Iterator, Sequence
 
 from dominio import Movie, Seletor
 from metricas import soma
@@ -51,6 +51,18 @@ def correlacionar(x: Seletor, y: Seletor, filmes: Iterable[Movie]) -> float | No
     )
 
 
+def pares_orcamento_faturamento(filmes: Iterable[Movie]) -> Iterator[tuple[float, float]]:
+    """Pares (orçamento, faturamento) válidos, gerados sob demanda.
+
+    Ficam de fora os filmes em que algum dos dois é desconhecido (0 no TMDB).
+    """
+    return (
+        (float(filme.orcamento), float(filme.faturamento))
+        for filme in filmes
+        if filme.orcamento > 0 and filme.faturamento > 0
+    )
+
+
 def _positivo(valor: float | None) -> float | None:
     """O TMDB usa 0 para 'não informado': para Análise, zero equivale a ausente."""
     return valor if valor is not None and valor > 0 else None
@@ -69,3 +81,29 @@ def orcamento_vs_faturamento(filmes: Iterable[Movie]) -> float | None:
 def orcamento_vs_nota(filmes: Iterable[Movie]) -> float | None:
     """Correlação orçamento x nota (só filmes com orçamento e nota válidos)."""
     return correlacionar(_orcamento, _nota, filmes)
+
+
+def relatorio_correlacao(filmes: Iterable[Movie]) -> str:
+    """Texto com o coeficiente, a quantidade de pares usados e o aviso de causalidade.
+
+    Devolve string (nada de `print`): quem exibe é a borda (`formatacao`).
+    """
+    pares = tuple(pares_orcamento_faturamento(filmes))
+    r = pearson(
+        tuple(map(itemgetter(0), pares)),
+        tuple(map(itemgetter(1), pares)),
+    )
+
+    motivo = (
+        ("  (não calculável: menos de 2 pares ou uma das séries é constante)",)
+        if r is None
+        else ()
+    )
+    return "\n".join((
+        "Correlação orçamento x faturamento",
+        f"  pares usados: {len(pares)}",
+        f"  coeficiente de Pearson: {'-' if r is None else f'{r:.3f}'}",
+        *motivo,
+        "  Correlação não implica causalidade: um coeficiente alto não prova "
+        "que o orçamento causou o faturamento.",
+    ))
