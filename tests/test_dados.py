@@ -10,6 +10,7 @@ from dados import (
     limpar_com,
     linha_para_movie,
     para_filmes,
+    para_movie,
     tem_ano_valido,
     tem_nota_valida,
     tem_valor,
@@ -201,3 +202,99 @@ def test_amostra_usa_islice_sem_consumir_tudo():
     infinita = (filme(id=i) for i in count(1))
     assert [f.id for f in amostra(infinita, 3)] == [1, 2, 3]
     assert [f.id for f in amostra((filme(id=i) for i in count(1)), 2, inicio=5)] == [6, 7]
+
+
+
+# ---------------------------------------------------------------- para_movie
+
+DETALHE = {
+    "id": 603,
+    "title": "Matrix",
+    "release_date": "1999-03-31",
+    "genres": [{"id": 28, "name": "Ação"}, {"id": 878, "name": "Ficção científica"}],
+    "budget": 63_000_000,
+    "revenue": 463_000_000,
+    "vote_average": 8.2,
+    "popularity": 60.5,
+    "runtime": 136,
+    "original_language": "en",
+    "production_countries": [{"iso_3166_1": "US", "name": "United States of America"}],
+    "production_companies": [{"id": 1, "name": "Warner Bros."}],
+    "belongs_to_collection": {"id": 2344, "name": "Matrix"},
+    "credits": {
+        "crew": [{"job": "Producer", "name": "Joel Silver"},
+                 {"job": "Director", "name": "Lana Wachowski"}],
+        "cast": [{"name": "Keanu Reeves"}, {"name": "Laurence Fishburne"},
+                 {"name": "Carrie-Anne Moss"}, {"name": "Hugo Weaving"},
+                 {"name": "Gloria Foster"}, {"name": "Joe Pantoliano"}],
+    },
+    "release_dates": {"results": [
+        {"iso_3166_1": "BR", "release_dates": [{"certification": "14"}]},
+        {"iso_3166_1": "US", "release_dates": [
+            {"certification": ""}, {"certification": "R"},
+        ]},
+    ]},
+}
+
+
+def test_para_movie_mapeia_todos_os_campos():
+    convertido = para_movie(DETALHE)
+    assert convertido == Movie(
+        id=603, titulo="Matrix", ano=1999, data_lancamento="1999-03-31",
+        generos=("Ação", "Ficção científica"), orcamento=63_000_000,
+        faturamento=463_000_000, nota=8.2, popularidade=60.5, duracao=136,
+        idioma_original="en", classificacao="R", diretor="Lana Wachowski",
+        elenco=("Keanu Reeves", "Laurence Fishburne", "Carrie-Anne Moss",
+                "Hugo Weaving", "Gloria Foster"),
+        paises=("US",), empresas=("Warner Bros.",), colecao="Matrix",
+    )
+
+
+def test_para_movie_sem_id_titulo_ou_data_devolve_none():
+    assert para_movie({**DETALHE, "id": None}) is None
+    assert para_movie({**DETALHE, "id": 0}) is None
+    assert para_movie({**DETALHE, "title": ""}) is None
+    assert para_movie({**DETALHE, "release_date": ""}) is None
+    assert para_movie({**DETALHE, "release_date": "31/03/1999"}) is None
+
+
+def test_para_movie_com_entrada_que_nao_e_mapping():
+    assert para_movie(None) is None
+    assert para_movie([1, 2, 3]) is None
+
+
+def test_para_movie_tolera_campos_ausentes():
+    minimo = para_movie({"id": 1, "title": "X", "release_date": "2001-01-02"})
+    assert minimo == Movie(id=1, titulo="X", ano=2001, data_lancamento="2001-01-02")
+
+
+def test_para_movie_com_listas_malformadas():
+    estranho = para_movie({
+        **DETALHE, "genres": None, "production_countries": "US",
+        "credits": {"cast": [{"name": ""}, "nome solto"]},
+        "release_dates": [],
+    })
+    assert estranho.generos == ()
+    assert estranho.paises == ()
+    assert estranho.elenco == ()
+    assert estranho.classificacao == ""
+    assert estranho.diretor == ""
+
+
+def test_para_movie_corta_nota_fora_da_faixa():
+    assert para_movie({**DETALHE, "vote_average": 12.5}).nota == 10.0
+    assert para_movie({**DETALHE, "vote_average": -1}).nota == 0.0
+
+
+def test_para_movie_sem_equipe_tecnica():
+    sem_creditos = para_movie({**DETALHE, "credits": {}})
+    assert sem_creditos.diretor == ""
+    assert sem_creditos.elenco == ()
+
+
+def test_para_movie_usa_a_primeira_classificacao_dos_eua():
+    so_br = para_movie({**DETALHE, "release_dates": {"results": [
+        {"iso_3166_1": "BR", "release_dates": [{"certification": "14"}]},
+        {"iso_3166_1": "US", "release_dates": [{"certification": ""}]},
+    ]}})
+    assert so_br.classificacao == ""

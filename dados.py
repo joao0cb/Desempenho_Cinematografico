@@ -159,6 +159,47 @@ def para_filmes(linhas: Iterable[Sequence[object] | None]) -> Iterator[Movie]:
     )
 
 
+def _objeto(valor: object) -> Mapping[str, Any]:
+    """Objeto JSON da resposta; {} quando ausente ou de outro tipo."""
+    return valor if isinstance(valor, Mapping) else {}
+
+
+def _itens(valor: object) -> tuple[Mapping[str, Any], ...]:
+    """Lista de objetos JSON da resposta, descartando o que não for objeto."""
+    if not isinstance(valor, (list, tuple)):
+        return ()
+    return tuple(item for item in valor if isinstance(item, Mapping))
+
+
+def _nota(valor: object) -> float:
+    """Nota dentro de 0..NOTA_MAX (o schema tem CHECK); fora da faixa, corta."""
+    return min(max(_decimal(valor), 0.0), NOTA_MAX)
+
+
+def _primeiro_diretor(creditos: Mapping[str, Any]) -> str:
+    """Nome do primeiro crédito com job == 'Director'; '' se não houver."""
+    return next(
+        (
+            _texto(pessoa.get("name"))
+            for pessoa in _itens(creditos.get("crew"))
+            if pessoa.get("job") == "Director"
+        ),
+        "",
+    )
+
+
+def _classificacao(release_dates: object) -> str:
+    """Certificação indicativa dos EUA (primeira não vazia); '' se não houver."""
+    for pais in _itens(_objeto(release_dates).get("results")):
+        if pais.get("iso_3166_1") != "US":
+            continue
+        for data in _itens(pais.get("release_dates")):
+            certificacao = _texto(data.get("certification"))
+            if certificacao:
+                return certificacao
+    return ""
+
+
 def para_movie(detalhe: Mapping[str, Any]) -> Movie | None:
     """Converte o JSON de /movie/{id} (com credits e release_dates) em Movie.
 
@@ -178,7 +219,35 @@ def para_movie(detalhe: Mapping[str, Any]) -> Movie | None:
     Devolve None se faltar `id`, título ou data/ano de lançamento. Campos opcionais
     ausentes viram o valor "desconhecido" (0, '' ou ()).
     """
-    raise NotImplementedError
+    if not isinstance(detalhe, Mapping):
+        return None
+
+    filme_id = _inteiro(detalhe.get("id"))
+    titulo = _texto(detalhe.get("title"))
+    data_lancamento = _data(detalhe.get("release_date"))
+    if filme_id <= 0 or not titulo or not data_lancamento:
+        return None
+
+    creditos = _objeto(detalhe.get("credits"))
+    return Movie(
+        id=filme_id,
+        titulo=titulo,
+        ano=_inteiro(data_lancamento[:4]),
+        data_lancamento=data_lancamento,
+        generos=_lista([item.get("name") for item in _itens(detalhe.get("genres"))]),
+        orcamento=_inteiro(detalhe.get("budget")),
+        faturamento=_inteiro(detalhe.get("revenue")),
+        nota=_nota(detalhe.get("vote_average")),
+        popularidade=_decimal(detalhe.get("popularity")),
+        duracao=_inteiro(detalhe.get("runtime")),
+        idioma_original=_texto(detalhe.get("original_language")),
+        classificacao=_classificacao(detalhe.get("release_dates")),
+        diretor=_primeiro_diretor(creditos),
+        elenco=_lista([item.get("name") for item in _itens(creditos.get("cast"))[:5]]),
+        paises=_lista([item.get("iso_3166_1") for item in _itens(detalhe.get("production_countries"))]),
+        empresas=_lista([item.get("name") for item in _itens(detalhe.get("production_companies"))]),
+        colecao=_texto(_objeto(detalhe.get("belongs_to_collection")).get("name")),
+    )
 
 
 # --------------------------------------------------------------------------
