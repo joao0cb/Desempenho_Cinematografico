@@ -6,5 +6,3 @@ requests>=2.31
 # Leitura do TMDB_TOKEN a partir do .env (main.py, seção 11: carregar_token)
 python-dotenv>=1.0
 
-# Suíte de testes (tests/)
-pytest>=8.0
