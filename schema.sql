@@ -1,11 +1,20 @@
 -- Schema do banco data/cinema.db (SQLite).
--- Contrato: uma linha de `filmes` corresponde exatamente a um `Movie` (dominio.py),
--- com as colunas NA MESMA ORDEM dos campos (tests/test_db.py verifica isso).
--- O banco é apenas ARMAZENAMENTO: nenhuma análise (GROUP BY, AVG, SUM...) é feita
--- aqui; o cálculo acontece em Python puro.
 --
--- Campos com vários valores (generos, elenco, paises, empresas)
--- ficam em uma coluna TEXT como lista JSON, ex.: '["Ação", "Ficção científica"]'.
+-- Este arquivo fica AO LADO do main.py: `main.SCHEMA_PATH` o localiza com
+-- `Path(__file__).with_name("schema.sql")`, e `inicializar_schema` o executa
+-- antes de qualquer gravação. Sem ele, `python main.py --ingerir` falha com
+-- FileNotFoundError e o banco não é criado.
+--
+-- Contrato: uma linha de `filmes` corresponde exatamente a um `Movie`
+-- (main.py, seção 2 — domínio), com as colunas NA MESMA ORDEM dos campos.
+-- `tests/test_db.py` verifica isso: a ordem de Movie._fields manda, e o
+-- INSERT do main.py é montado a partir dela.
+--
+-- O banco é apenas ARMAZENAMENTO: nenhuma análise (GROUP BY, AVG, SUM...) é
+-- feita aqui; todo o cálculo acontece em Python puro.
+--
+-- Campos com vários valores (generos, elenco, paises, empresas) ficam em uma
+-- coluna TEXT como lista JSON, ex.: '["Ação", "Ficção científica"]'.
 -- Convenção de "desconhecido": 0 (números), '' (textos) e '[]' (listas).
 
 CREATE TABLE IF NOT EXISTS filmes (

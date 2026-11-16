@@ -1,4 +1,4 @@
-# Segredos
+# Segredos — o token do TMDB vive só no .env, que nunca é versionado
 .env
 
 # Python
@@ -13,3 +13,6 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Observação: data/cinema.db NÃO é ignorado de propósito — a base vai versionada
+# como plano B para a apresentação rodar sem internet (issue #12).

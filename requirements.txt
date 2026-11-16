@@ -1,3 +1,10 @@
+# Dependências do projeto (Python 3.10+; testado no 3.12).
+
+# HTTP do cliente do TMDB (main.py, seção 11: descobrir_filmes / detalhar_filme)
 requests>=2.31
+
+# Leitura do TMDB_TOKEN a partir do .env (main.py, seção 11: carregar_token)
 python-dotenv>=1.0
+
+# Suíte de testes (tests/)
 pytest>=8.0
